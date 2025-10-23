@@ -1,0 +1,141 @@
+/**
+ * Gravity Forms Entries table — truncate long text with clear "More ▾ / Less ▴" indicator.
+ * Works across AJAX reloads. Run in admin only.
+ */
+add_action('admin_print_footer_scripts', function () {
+    $screen = function_exists('get_current_screen') ? get_current_screen() : null;
+    $screen_id = $screen ? $screen->id : '';
+    $is_gf_entries = (isset($_GET['page']) && $_GET['page'] === 'gf_entries')
+                     || strpos($screen_id, 'gf_entries') !== false;
+
+    if (!$is_gf_entries) return;
+
+    // === EDIT: exact column labels as shown in the Entries table ===
+    $colnames = [
+        'Message', // add/remove as needed
+    ];
+    // =================================================================
+    $selectors = array_map(
+        fn($label) => 'td[data-colname="' . esc_attr($label) . '"]',
+        $colnames
+    );
+    $selector_list = implode(', ', $selectors);
+    ?>
+    <style id="gf-entries-truncate-css">
+        <?php echo $selector_list; ?> {
+            vertical-align: top;
+            max-width: 560px;
+            cursor: pointer;
+            transition: background 0.15s ease;
+            position: relative;
+        }
+        <?php echo $selector_list; ?>:hover {
+            background: rgba(0,0,0,0.025);
+        }
+
+        /* Wrapper used for line-clamp */
+        <?php echo $selector_list; ?> .gf-clamp-wrap {
+            display: -webkit-box !important;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden !important;
+            text-overflow: ellipsis;
+            white-space: normal !important;
+            word-break: break-word;
+            max-height: 4.8em;
+            position: relative;
+            padding-right: 48px; /* leave space for label */
+        }
+
+        /* Persistent label/icon — visible even when clamped */
+        <?php echo $selector_list; ?> .gf-clamp-icon {
+            position: absolute;
+            bottom: 2px;
+            right: 4px;
+            font-size: 11px;
+            color: rgba(0,0,0,0.55);
+            pointer-events: none;
+            background: #fff;
+            padding-left: 4px;
+        }
+
+        /* Default collapsed state: "More ▾" */
+        <?php echo $selector_list; ?>:not(.gf-expanded) .gf-clamp-icon::before {
+            content: "More ▾";
+        }
+
+        /* Expanded state: "Less ▴" */
+        <?php echo $selector_list; ?>.gf-expanded .gf-clamp-icon::before {
+            content: "Less ▴";
+        }
+
+        /* Expanded text removes clamp */
+        <?php echo $selector_list; ?>.gf-expanded .gf-clamp-wrap {
+            -webkit-line-clamp: unset;
+            max-height: none;
+            overflow: visible !important;
+        }
+    </style>
+
+    <script id="gf-entries-truncate-js">
+    (function () {
+        var labels = <?php echo wp_json_encode(array_values($colnames)); ?>;
+
+        function isTargetCell(td) {
+            if (!td || td.tagName !== 'TD') return false;
+            var label = (td.getAttribute('data-colname') || '').trim();
+            return labels.indexOf(label) !== -1;
+        }
+
+        // Wrap content + add label/icon
+        function wrapCell(td) {
+            if (!td || td.querySelector(':scope > .gf-clamp-wrap')) return;
+
+            var wrapper = document.createElement('div');
+            wrapper.className = 'gf-clamp-wrap';
+            var frag = document.createDocumentFragment();
+            while (td.firstChild) frag.appendChild(td.firstChild);
+            wrapper.appendChild(frag);
+            td.appendChild(wrapper);
+
+            var icon = document.createElement('span');
+            icon.className = 'gf-clamp-icon';
+            td.appendChild(icon);
+
+            td.setAttribute('title', 'Click to expand/collapse');
+        }
+
+        function process(context) {
+            (context || document).querySelectorAll('td[data-colname]').forEach(function (td) {
+                if (isTargetCell(td)) wrapCell(td);
+            });
+        }
+
+        // Toggle expand/collapse
+        document.addEventListener('click', function (e) {
+            var td = e.target.closest('td[data-colname]');
+            if (!isTargetCell(td)) return;
+            if (e.target.closest('a, button, [role="button"], .row-actions')) return;
+            td.classList.toggle('gf-expanded');
+        }, true);
+
+        // Observe AJAX reloads
+        var container = document.querySelector('#gforms-entry-list, .wrap') || document.body;
+        var mo = new MutationObserver(function (mutations) {
+            var changed = mutations.some(function (m) {
+                return (m.addedNodes && m.addedNodes.length) || (m.removedNodes && m.removedNodes.length);
+            });
+            if (changed) process(container);
+        });
+        mo.observe(container, { childList: true, subtree: true });
+
+        // Initial passes
+        document.addEventListener('DOMContentLoaded', function () { process(container); });
+        window.addEventListener('load', function () {
+            process(container);
+            setTimeout(function () { process(container); }, 400);
+        });
+    })();
+    </script>
+    <?php
+});
